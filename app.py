@@ -2,7 +2,7 @@ import os
 import json
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import anthropic
+import google.generativeai as genai
 
 try:
     from dotenv import load_dotenv
@@ -68,37 +68,31 @@ def analyze():
     if not data or "b64" not in data or "mime" not in data:
         return jsonify({"error": "Se requieren los campos b64 y mime"}), 400
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        return jsonify({"error": "ANTHROPIC_API_KEY no está configurada"}), 500
+        return jsonify({"error": "GOOGLE_API_KEY no está configurada en el archivo .env"}), 500
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1500,
-            system=SYSTEM_PROMPT,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": data["mime"],
-                            "data": data["b64"],
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": "Evalúa este betta splendens. Responde SOLO con el JSON estructurado.",
-                    },
-                ],
-            }],
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            model_name="gemini-2.0-flash",
+            system_instruction=SYSTEM_PROMPT,
         )
 
-        raw = response.content[0].text.strip()
-        # Strip markdown code fences if Claude wraps the JSON
+        image_part = {
+            "inline_data": {
+                "mime_type": data["mime"],
+                "data": data["b64"],
+            }
+        }
+
+        response = model.generate_content([
+            image_part,
+            "Evalúa este betta splendens. Responde SOLO con el JSON estructurado.",
+        ])
+
+        raw = response.text.strip()
+        # Strip markdown code fences if Gemini wraps the JSON
         if raw.startswith("```"):
             lines = raw.splitlines()
             raw = "\n".join(lines[1:])
@@ -110,8 +104,6 @@ def analyze():
 
     except json.JSONDecodeError as e:
         return jsonify({"error": f"Error parseando respuesta de IA: {e}"}), 500
-    except anthropic.APIError as e:
-        return jsonify({"error": f"Error de API Anthropic: {e}"}), 500
     except Exception as e:
         return jsonify({"error": f"Error inesperado: {e}"}), 500
 
@@ -119,5 +111,5 @@ def analyze():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
     print(f"\n🐟  Betta Judge → http://localhost:{port}")
-    print("    Requiere: ANTHROPIC_API_KEY en entorno o archivo .env\n")
+    print("    Requiere: GOOGLE_API_KEY en entorno o archivo .env\n")
     app.run(host="0.0.0.0", port=port, debug=False)
