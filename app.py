@@ -1,8 +1,9 @@
+# -*- coding: utf-8 -*-
 import os
 import json
+import requests as http
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import google.generativeai as genai
 
 try:
     from dotenv import load_dotenv
@@ -13,48 +14,47 @@ except ImportError:
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
-SYSTEM_PROMPT = """Eres un juez experto en Betta Splendens con certificación IBC (International Betta Congress).
-Evalúa la imagen usando el estándar técnico IBC para selección de reproductores y valoración comercial en el mercado estadounidense.
+GEMINI_API = (
+    "https://generativelanguage.googleapis.com"
+    "/v1beta/models/gemini-2.0-flash:generateContent"
+)
 
-PARÁMETROS (escala 0-10):
-1. ALETAS (25%): Simetría bilateral, spreading ≥180°, integridad de dorsal/caudal/anal/ventrales/pectorales
-2. COLOR (25%): Intensidad, uniformidad, patrón, iridiscencia, brillo metálico, ausencia de decoloración
-3. POSTURA (20%): Porte erguido, proporciones correctas, actitud dominante, cuerpo fusiforme sin deformidades
-4. MORPH (15%): Identificación precisa del tipo (HM, HMPK, CT, DT, VT, Koi, Galaxy, Fancy, etc.) y pureza respecto al estándar
-5. CONDICIÓN (15%): Salud general, ausencia de velvet/ich/fin rot/lesiones, peso y proporciones adecuadas
-
-CÁLCULO: nota_final = (aletas×0.25) + (color×0.25) + (postura×0.20) + (morph×0.15) + (condicion×0.15)
-Redondea nota_final a 1 decimal.
-
-CATEGORÍAS:
-9.0-10.0 → "Campeón"
-7.5-8.9  → "Show Quality"
-6.0-7.4  → "Breeding Quality"
-4.0-5.9  → "Pet Quality"
-0.0-3.9  → "No recomendado"
-
-Responde ÚNICAMENTE con JSON válido, sin markdown, sin texto adicional:
-{
-  "nota_final": <número con 1 decimal>,
-  "categoria": <"Campeón"|"Show Quality"|"Breeding Quality"|"Pet Quality"|"No recomendado">,
-  "morph_identificado": <nombre técnico completo>,
-  "scores": {
-    "aletas": <0.0-10.0>,
-    "color": <0.0-10.0>,
-    "postura": <0.0-10.0>,
-    "morph": <0.0-10.0>,
-    "condicion": <0.0-10.0>
-  },
-  "comentarios": {
-    "aletas": <análisis técnico, 1-2 oraciones en español>,
-    "color": <análisis técnico, 1-2 oraciones en español>,
-    "postura": <análisis técnico, 1-2 oraciones en español>,
-    "morph": <análisis técnico, 1-2 oraciones en español>,
-    "condicion": <análisis técnico, 1-2 oraciones en español>
-  },
-  "resumen": <2-3 oraciones orientadas a breeding o reventa, en español>,
-  "recomendacion": <"Apto reproductor"|"Apto reventa premium"|"Apto reventa estándar"|"Solo mascota"|"No recomendado">
-}"""
+SYSTEM_PROMPT = (
+    "Eres un juez experto en Betta Splendens con certificacion IBC "
+    "(International Betta Congress). Evalua la imagen usando el estandar "
+    "tecnico IBC para seleccion de reproductores y valoracion comercial "
+    "en el mercado estadounidense.\n\n"
+    "PARAMETROS (escala 0-10):\n"
+    "1. ALETAS (25%): Simetria bilateral, spreading >=180 grados, "
+    "integridad de dorsal/caudal/anal/ventrales/pectorales\n"
+    "2. COLOR (25%): Intensidad, uniformidad, patron, iridiscencia, "
+    "brillo metalico, ausencia de decoloracion\n"
+    "3. POSTURA (20%): Porte erguido, proporciones correctas, actitud "
+    "dominante, cuerpo fusiforme sin deformidades\n"
+    "4. MORPH (15%): Identificacion precisa del tipo (HM, HMPK, CT, DT, "
+    "VT, Koi, Galaxy, Fancy, etc.) y pureza respecto al estandar\n"
+    "5. CONDICION (15%): Salud general, ausencia de velvet/ich/fin rot/"
+    "lesiones, peso y proporciones adecuadas\n\n"
+    "CALCULO: nota_final = (aletas*0.25)+(color*0.25)+(postura*0.20)"
+    "+(morph*0.15)+(condicion*0.15). Redondea a 1 decimal.\n\n"
+    "CATEGORIAS:\n"
+    "9.0-10.0 -> \"Campeon\"\n"
+    "7.5-8.9  -> \"Show Quality\"\n"
+    "6.0-7.4  -> \"Breeding Quality\"\n"
+    "4.0-5.9  -> \"Pet Quality\"\n"
+    "0.0-3.9  -> \"No recomendado\"\n\n"
+    "Responde UNICAMENTE con JSON valido, sin markdown, sin texto adicional:\n"
+    '{"nota_final":<decimal>,"categoria":<"Campeon"|"Show Quality"|'
+    '"Breeding Quality"|"Pet Quality"|"No recomendado">,'
+    '"morph_identificado":<string>,'
+    '"scores":{"aletas":<0-10>,"color":<0-10>,"postura":<0-10>,'
+    '"morph":<0-10>,"condicion":<0-10>},'
+    '"comentarios":{"aletas":<string>,"color":<string>,"postura":<string>,'
+    '"morph":<string>,"condicion":<string>},'
+    '"resumen":<2-3 oraciones sobre breeding o reventa>,'
+    '"recomendacion":<"Apto reproductor"|"Apto reventa premium"|'
+    '"Apto reventa estandar"|"Solo mascota"|"No recomendado">}'
+)
 
 
 @app.route("/")
@@ -70,28 +70,47 @@ def analyze():
 
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        return jsonify({"error": "GOOGLE_API_KEY no está configurada en el archivo .env"}), 500
+        return jsonify({"error": "GOOGLE_API_KEY no esta configurada en .env"}), 500
+
+    payload = {
+        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [{
+            "parts": [
+                {
+                    "inline_data": {
+                        "mime_type": data["mime"],
+                        "data": data["b64"],
+                    }
+                },
+                {
+                    "text": (
+                        "Evalua este betta splendens. "
+                        "Responde SOLO con el JSON estructurado."
+                    )
+                },
+            ]
+        }],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 1500,
+        },
+    }
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
-            system_instruction=SYSTEM_PROMPT,
+        resp = http.post(
+            f"{GEMINI_API}?key={api_key}",
+            json=payload,
+            timeout=60,
         )
 
-        image_part = {
-            "inline_data": {
-                "mime_type": data["mime"],
-                "data": data["b64"],
-            }
-        }
+        if not resp.ok:
+            detail = resp.json().get("error", {}).get("message", resp.text[:200])
+            return jsonify({"error": f"Error Gemini API: {detail}"}), 500
 
-        response = model.generate_content([
-            image_part,
-            "Evalúa este betta splendens. Responde SOLO con el JSON estructurado.",
-        ])
+        raw = (
+            resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        )
 
-        raw = response.text.strip()
         # Strip markdown code fences if Gemini wraps the JSON
         if raw.startswith("```"):
             lines = raw.splitlines()
@@ -103,13 +122,13 @@ def analyze():
         return jsonify(result)
 
     except json.JSONDecodeError as e:
-        return jsonify({"error": f"Error parseando respuesta de IA: {e}"}), 500
+        return jsonify({"error": f"Error parseando respuesta: {e}"}), 500
     except Exception as e:
         return jsonify({"error": f"Error inesperado: {e}"}), 500
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
-    print(f"\n🐟  Betta Judge → http://localhost:{port}")
-    print("    Requiere: GOOGLE_API_KEY en entorno o archivo .env\n")
+    print(f"\n  Betta Judge -> http://localhost:{port}")
+    print("  Requiere: GOOGLE_API_KEY en archivo .env\n")
     app.run(host="0.0.0.0", port=port, debug=False)
