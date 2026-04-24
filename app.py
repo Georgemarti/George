@@ -3,7 +3,7 @@ import os
 import sys
 import json
 import requests as http
-from flask import Flask, request, Response, send_from_directory
+from flask import Flask, request, Response, send_from_directory, abort
 from flask_cors import CORS
 
 # Forzar UTF-8 en stdout/stderr para evitar errores de encoding en Windows
@@ -65,9 +65,10 @@ SYSTEM_PROMPT = (
 
 
 def _json(data, status=200):
-    """Serializa a JSON con UTF-8 explícito, evitando cualquier capa ASCII."""
-    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-    return Response(body, status=status, content_type="application/json; charset=utf-8")
+    # ensure_ascii=True produce salida 100% ASCII (escapa ó → ó).
+    # Imposible de fallar con UnicodeEncodeError en cualquier plataforma.
+    body = json.dumps(data, ensure_ascii=True)
+    return Response(body, status=status, content_type="application/json")
 
 
 @app.route("/")
@@ -79,11 +80,11 @@ def index():
 def analyze():
     data = request.get_json()
     if not data or "b64" not in data or "mime" not in data:
-        return jsonify({"error": "Se requieren los campos b64 y mime"}), 400
+        return _json({"error": "Se requieren los campos b64 y mime"}, 400)
 
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        return jsonify({"error": "GOOGLE_API_KEY no esta configurada en .env"}), 500
+        return _json({"error": "GOOGLE_API_KEY no esta configurada en .env"}, 500)
 
     payload = {
         "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
