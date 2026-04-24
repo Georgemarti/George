@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
 import json
 import requests as http
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, Response, send_from_directory
 from flask_cors import CORS
+
+# Forzar UTF-8 en stdout/stderr para evitar errores de encoding en Windows
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 try:
     from dotenv import load_dotenv
@@ -57,6 +64,12 @@ SYSTEM_PROMPT = (
 )
 
 
+def _json(data, status=200):
+    """Serializa a JSON con UTF-8 explícito, evitando cualquier capa ASCII."""
+    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    return Response(body, status=status, content_type="application/json; charset=utf-8")
+
+
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
@@ -103,15 +116,16 @@ def analyze():
             timeout=60,
         )
 
+        # Decodificar siempre como UTF-8, ignorando lo que diga la cabecera
+        body = json.loads(resp.content.decode("utf-8"))
+
         if not resp.ok:
-            detail = resp.json().get("error", {}).get("message", resp.text[:200])
-            return jsonify({"error": f"Error Gemini API: {detail}"}), 500
+            detail = body.get("error", {}).get("message", f"HTTP {resp.status_code}")
+            return _json({"error": f"Error Gemini API: {detail}"}, 500)
 
-        raw = (
-            resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        )
+        raw = body["candidates"][0]["content"]["parts"][0]["text"].strip()
 
-        # Strip markdown code fences if Gemini wraps the JSON
+        # Strip markdown code fences si Gemini envuelve el JSON
         if raw.startswith("```"):
             lines = raw.splitlines()
             raw = "\n".join(lines[1:])
@@ -119,12 +133,12 @@ def analyze():
                 raw = raw.rstrip()[:-3].rstrip()
 
         result = json.loads(raw)
-        return jsonify(result)
+        return _json(result)
 
     except json.JSONDecodeError as e:
-        return jsonify({"error": f"Error parseando respuesta: {e}"}), 500
+        return _json({"error": f"Error parseando respuesta: {e}"}, 500)
     except Exception as e:
-        return jsonify({"error": f"Error inesperado: {e}"}), 500
+        return _json({"error": f"Error inesperado: {e}"}, 500)
 
 
 if __name__ == "__main__":
