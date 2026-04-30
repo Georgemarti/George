@@ -50,6 +50,57 @@ SYSTEM_PROMPT = (
     "6.0-7.4  -> \"Breeding Quality\"\n"
     "4.0-5.9  -> \"Pet Quality\"\n"
     "0.0-3.9  -> \"No recomendado\"\n\n"
+    "EVALUACION POR SEXO:\n\n"
+    "MACHO:\n"
+    "- ALETAS: spreading obligatorio >=180 grados (HM/DT), >=160 grados (HMPK/Plakat). "
+    "Simetria bilateral perfecta en caudal, dorsal y anal. Ventrales largas y parejas. "
+    "Penalizar asimetria, clamping, holes o bordes irregulares.\n"
+    "- COLOR: maxima intensidad en flare. Iridiscencia y brillo metalico prominentes. "
+    "Uniformidad del patron. Penalizar zonas decoloradas o wash-out.\n"
+    "- POSTURA: actitud dominante, cuerpo fusiforme sin joroba, cabeza alineada.\n"
+    "- MORPH: evaluar pureza estricta segun el tipo identificado.\n"
+    "- CONDICION: peso adecuado, sin signos de enfermedad, aletas integras.\n\n"
+    "HEMBRA:\n"
+    "- ALETAS: aletas cortas son NORMALES. NO penalizar por spreading reducido. "
+    "Evaluar integridad (sin fin rot, sin holes) y simetria relativa a su tipo.\n"
+    "- COLOR: puede ser menos intensa que macho; evaluar calidad del patron "
+    "y ausencia de decoloracion. En Koi/Galaxy evaluar distribucion cromatica.\n"
+    "- POSTURA: cuerpo mas robusto y redondeado es normal. Mancha oviducto visible "
+    "(punto blanco ventral) es signo positivo de condicion reproductora. "
+    "Penalizar joroba, espina curvada o abdomen distendido anormal.\n"
+    "- MORPH: mismos criterios de patron y tipo que macho; adaptar expectativa "
+    "de aletas a proporciones normales de hembra.\n"
+    "- CONDICION: prioritaria para breeding. Evaluar llenado corporal, "
+    "ausencia de parasitos, color de agallas.\n\n"
+    "Si no se especifica sexo: asumir macho salvo evidencia visual clara de hembra "
+    "(cuerpo mas ancho, aletas cortas, mancha oviducto visible).\n\n"
+    "EVALUACION POR MORPH (aplicar cuando el morph es conocido):\n\n"
+    "HM - Halfmoon: Caudal en forma de D perfecta, spreading >=180 grados. "
+    "Bordes del caudal rectos. Dorsal y anal proporcionales al caudal. "
+    "Penalizar angulo menor a 180, bordes curvados o asimetria.\n\n"
+    "HMPK - Halfmoon Plakat: Cuerpo compacto y musculoso. Aletas cortas pero "
+    "spreading >=180 grados. Caudal con forma de D aunque reducida. "
+    "Dorsal erecta y bien desarrollada. Penalizar cuerpo largo o spreading <160.\n\n"
+    "CT - Crowntail: Extensiones de rayos mas alla del borde de membrana (webbing). "
+    "Evaluar % de reduccion de membrana (>50% ideal) y simetria de rayos. "
+    "Rayos dobles o cruzados penalizan. Extensiones parejas en todos los rayos.\n\n"
+    "DT - Double Tail: Dos lobulos caudales claramente separados e igual tamano. "
+    "Simetria entre lobulos critica. Dorsal extra-desarrollada es positiva. "
+    "Penalizar lobulos de tamano desigual o fusion parcial.\n\n"
+    "VT - Veiltail: Caudal largo y fluido, caida natural aceptable. "
+    "Evaluar integridad y longitud. Color importa mas que el spread exacto.\n\n"
+    "Koi / Galaxy / Koi Galaxy: Evaluar distribucion del patron de color sobre base "
+    "clara o iridiscente. Galaxy: escamas iridiscentes y brillo metalico sobre fondo oscuro. "
+    "Koi: manchas irregulares estilo carpa koi bien delimitadas. "
+    "Koi Galaxy: combinacion de ambos; rareza del patron suma al score morph.\n\n"
+    "Fancy / Multicolor: Evaluar numero de colores, separacion clara entre zonas, "
+    "ausencia de bleeding (colores que se mezclan indeseablemente). "
+    "Mayor complejidad del patron es positiva.\n\n"
+    "Combinaciones (HMPK Koi, HMPK Galaxy, etc.): aplicar criterios de aletas "
+    "del tipo de cola + criterios de color/patron del tipo de coloracion.\n\n"
+    "Si el morph no es identificable con certeza: indicarlo en morph_identificado "
+    "como \"Indeterminado - [descripcion breve]\" y bajar el score morph "
+    "proporcionalmente a la incertidumbre.\n\n"
     "Responde UNICAMENTE con JSON valido, sin markdown, sin texto adicional:\n"
     '{"nota_final":<decimal>,"categoria":<"Campeon"|"Show Quality"|'
     '"Breeding Quality"|"Pet Quality"|"No recomendado">,'
@@ -86,6 +137,22 @@ def analyze():
     if not api_key:
         return _json({"error": "GOOGLE_API_KEY no esta configurada en .env"}, 500)
 
+    sexo          = (data.get("sexo") or "").strip().lower()
+    morph_usuario = (data.get("morph_usuario") or "").strip()
+
+    parts = ["Evalua este betta splendens."]
+    if sexo in ("macho", "hembra"):
+        parts.append(f"Sexo: {sexo.capitalize()}.")
+    if morph_usuario:
+        parts.append(
+            f"El criador identifica este pez como {morph_usuario}. "
+            "Usa este morph como referencia principal para el parametro morph. "
+            f"En morph_identificado devuelve exactamente \"{morph_usuario}\". "
+            "No intentes reclasificarlo."
+        )
+    parts.append("Responde SOLO con el JSON estructurado.")
+    user_text = " ".join(parts)
+
     payload = {
         "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": [{
@@ -96,12 +163,7 @@ def analyze():
                         "data": data["b64"],
                     }
                 },
-                {
-                    "text": (
-                        "Evalua este betta splendens. "
-                        "Responde SOLO con el JSON estructurado."
-                    )
-                },
+                {"text": user_text},
             ]
         }],
         "generationConfig": {
